@@ -18,9 +18,10 @@ module mips(input          clk, reset,
             output  [31:0] aluout, writedata,
             input   [31:0] readdata);
 
-  wire        memtoreg, branch,
+  wire        memtoreg,
                pcsrc, zero,
-               alusrc, regdst, regwrite, jump;
+               regdst, regwrite, jump;
+  wire [1:0] alusrc;
   wire [2:0]  alucontrol;
 
   controller c(instr[31:26], instr[5:0], zero,
@@ -37,44 +38,52 @@ endmodule
 module controller(input   [5:0] op, funct,
                   input         zero,
                   output        memtoreg, memwrite,
-                  output        pcsrc, alusrc,
+                  output        pcsrc,
+                  output  [1:0] alusrc,
                   output        regdst, regwrite,
                   output        jump,
                   output  [2:0] alucontrol);
 
   wire [1:0] aluop;
   wire       branch;
+  wire       bne;
 
-  maindec md(op, memtoreg, memwrite, branch,
+  maindec md(op, memtoreg, memwrite, branch, bne,
              alusrc, regdst, regwrite, jump,
              aluop);
   aludec  ad(funct, aluop, alucontrol);
 
-  assign pcsrc = branch & zero;
+  assign pcsrc = branch & (bne ^ zero);
 endmodule
 
 module maindec(input   [5:0] op,
                output        memtoreg, memwrite,
-               output        branch, alusrc,
+               output        branch,
+               //bne is added
+               output        bne,
+               //alusrc is modified
+               output  [1:0] alusrc,
                output        regdst, regwrite,
                output        jump,
                output  [1:0] aluop);
 
-  reg [8:0] controls;
+  reg [10:0] controls;
 
   assign {regwrite, regdst, alusrc,
           branch, memwrite,
-          memtoreg, jump, aluop} = controls;
+          memtoreg, jump, aluop, bne} = controls; // expanded
 
-  always@(*)
+  always_comb
     case(op)
-      6'b000000: controls <= 9'b110000010; //Rtype
-      6'b100011: controls <= 9'b101001000; //LW
-      6'b101011: controls <= 9'b001010000; //SW
-      6'b000100: controls <= 9'b000100001; //BEQ
-      6'b001000: controls <= 9'b101000000; //ADDI
-      6'b000010: controls <= 9'b000000100; //J
-      default:   controls <= 9'bxxxxxxxxx; //???
+      6'b000000: controls <= 11'b11000000100; //Rtype
+      6'b100011: controls <= 11'b10010010000; //LW
+      6'b101011: controls <= 11'b00010100000; //SW
+      6'b000100: controls <= 11'b00001000010; //BEQ
+      6'b001000: controls <= 11'b10010000000; //ADDI
+      6'b000010: controls <= 11'b00000001000; //J
+      6'b001101: controls <= 11'b10100000110; // ORI, ALUOp=11 (OR)
+      6'b000101: controls <= 11'b00001000011; // BNE
+      default:   controls <= 11'bxxxxxxxxxxx; //???
     endcase
 endmodule
 
@@ -86,6 +95,7 @@ module aludec(input   [5:0] funct,
     case(aluop)
       2'b00: alucontrol <= 3'b010;  // add
       2'b01: alucontrol <= 3'b110;  // sub
+      2'b11: alucontrol <= 3'b001;  // or
       default: case(funct)          // RTYPE
           6'b100000: alucontrol <= 3'b010; // ADD
           6'b100010: alucontrol <= 3'b110; // SUB
@@ -99,7 +109,9 @@ endmodule
 
 module datapath(input          clk, reset,
                 input          memtoreg, pcsrc,
-                input          alusrc, regdst,
+                // expanded for ori
+                input   [1:0]  alusrc,
+                input          regdst,
                 input          regwrite, jump,
                 input   [2:0]  alucontrol,
                 output         zero,
@@ -110,7 +122,7 @@ module datapath(input          clk, reset,
 
   wire [4:0]  writereg;
   wire [31:0] pcnext, pcnextbr, pcplus4, pcbranch;
-  wire [31:0] signimm, signimmsh;
+  wire [31:0] signimm, zeroimm, signimmsh;
   wire [31:0] srca, srcb;
   wire [31:0] result;
 
@@ -135,11 +147,17 @@ module datapath(input          clk, reset,
                      memtoreg, result);
   signext     se(instr[15:0], signimm);
 
+  zeroext     ze(instr[15:0], zeroimm);
+
   // ALU logic
-  mux2 #(32)  srcbmux(writedata, signimm, alusrc,
+  // srcbmux is modified to handle ori
+  mux4 #(32)  srcbmux(writedata, signimm, zeroimm, ,alusrc,
                       srcb);
+
   alu32         alu(.A(srca), .B(srcb), .F(alucontrol),
                   .Y(aluout), .Zero(zero));
+
+  //
 endmodule
 
 module regfile(input          clk,
@@ -181,6 +199,12 @@ module signext(input   [15:0] a,
   assign y = {{16{a[15]}}, a};
 endmodule
 
+module zeroext(input   [15:0] a,
+               output  [31:0] y);
+
+  assign y = {{16{1'b0}}, a};
+endmodule
+
 module flopr #(parameter WIDTH = 8)
               (input               clk, reset,
                input      [WIDTH-1:0] d,
@@ -210,6 +234,13 @@ module mux2 #(parameter WIDTH = 8)
   assign y = s ? d1 : d0;
 endmodule
 
+module mux4 #(parameter WIDTH = 32)
+             (input   [WIDTH-1:0] d0, d1, d2, d3,
+              input   [1:0]       s,
+              output  [WIDTH-1:0] y);
+
+  assign y = s[1] ? (s[0] ? d3: d2) : (s[0] ? d1: d0);
+endmodule
 
 module alu32( input [31:0] A, B, input [2:0] F,
               output reg [31:0] Y,
@@ -251,8 +282,9 @@ module imem(input   [5:0]  a,
 
   initial
     begin
-      $readmemh("memfile.dat",ROM); // initialize memory
+      $readmemh("memfile2.dat",ROM); // initialize memory
     end
 
   assign rd = ROM[a]; // word aligned
 endmodule
+
