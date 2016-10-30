@@ -64,10 +64,14 @@ module testbench();
 
   task check_rf;
     begin
-      $display("wa3=%d(d) contains wd3=%h\nregwrite=%b",
+      $display("wa3=%d(d) contains wd3=%h\nregwrite=%b\nra1=%d(d)\trd1=%h\nra2=%d(d)\trd2=%h",
       dut.mips.dp.rf.wa3,
       dut.mips.dp.rf.wd3,
-      dut.mips.dp.rf.we3);
+      dut.mips.dp.rf.we3,
+      dut.mips.dp.rf.ra1,
+      dut.mips.dp.rf.rd1,
+      dut.mips.dp.rf.ra2,
+      dut.mips.dp.rf.rd2);
 
     end
   endtask
