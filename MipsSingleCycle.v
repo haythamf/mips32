@@ -18,18 +18,18 @@ module mips(input          clk, reset,
             output  [31:0] aluout, writedata,
             input   [31:0] readdata);
 
-  wire        memtoreg,
+  wire         memtoreg,
                pcsrc, zero,
-               regdst, regwrite, jump;
+               regdst, regwrite, jump, jal;
   wire [1:0] alusrc;
   wire [2:0]  alucontrol;
 
   controller c(instr[31:26], instr[5:0], zero,
                memtoreg, memwrite, pcsrc,
                alusrc, regdst, regwrite, jump,
-               alucontrol);
+               jal, alucontrol);
   datapath dp(clk, reset, memtoreg, pcsrc,
-              alusrc, regdst, regwrite, jump,
+              alusrc, regdst, regwrite, jump, jal,
               alucontrol,
               zero, pc, instr,
               aluout, writedata, readdata);
@@ -41,7 +41,7 @@ module controller(input   [5:0] op, funct,
                   output        pcsrc,
                   output  [1:0] alusrc,
                   output        regdst, regwrite,
-                  output        jump,
+                  output        jump, jal,
                   output  [2:0] alucontrol);
 
   wire [1:0] aluop;
@@ -49,7 +49,7 @@ module controller(input   [5:0] op, funct,
   wire       bne;
 
   maindec md(op, memtoreg, memwrite, branch, bne,
-             alusrc, regdst, regwrite, jump,
+             alusrc, regdst, regwrite, jump, jal,
              aluop);
   aludec  ad(funct, aluop, alucontrol);
 
@@ -64,26 +64,27 @@ module maindec(input   [5:0] op,
                //alusrc is modified
                output  [1:0] alusrc,
                output        regdst, regwrite,
-               output        jump,
+               output        jump, jal,
                output  [1:0] aluop);
 
-  reg [10:0] controls;
+  reg [11:0] controls;
 
   assign {regwrite, regdst, alusrc,
           branch, memwrite,
-          memtoreg, jump, aluop, bne} = controls; // expanded
+          memtoreg, jump, aluop, bne, jal} = controls; // expanded
 
   always_comb
     case(op)
-      6'b000000: controls <= 11'b11000000100; //Rtype
-      6'b100011: controls <= 11'b10010010000; //LW
-      6'b101011: controls <= 11'b00010100000; //SW
-      6'b000100: controls <= 11'b00001000010; //BEQ
-      6'b001000: controls <= 11'b10010000000; //ADDI
-      6'b000010: controls <= 11'b00000001000; //J
-      6'b001101: controls <= 11'b10100000110; // ORI, ALUOp=11 (OR)
-      6'b000101: controls <= 11'b00001000011; // BNE
-      default:   controls <= 11'bxxxxxxxxxxx; //???
+      6'b000000: controls <= 12'b110000001000; //Rtype
+      6'b100011: controls <= 12'b100100100000; //LW
+      6'b101011: controls <= 12'b000101000000; //SW
+      6'b000100: controls <= 12'b000010000100; //BEQ
+      6'b001000: controls <= 12'b100100000000; //ADDI
+      6'b000010: controls <= 12'b000000010000; //J
+      6'b000011: controls <= 12'b100000010001; //jal
+      6'b001101: controls <= 12'b101000001100; // ORI, ALUOp=11 (OR)
+      6'b000101: controls <= 12'b000010000110; // BNE
+      default:   controls <= 12'bxxxxxxxxxxxx; //???
     endcase
 endmodule
 
@@ -112,7 +113,7 @@ module datapath(input          clk, reset,
                 // expanded for ori
                 input   [1:0]  alusrc,
                 input          regdst,
-                input          regwrite, jump,
+                input          regwrite, jump, jal,
                 input   [2:0]  alucontrol,
                 output         zero,
                 output  [31:0] pc,
@@ -120,17 +121,22 @@ module datapath(input          clk, reset,
                 output  [31:0] aluout, writedata,
                 input   [31:0] readdata);
 
-  wire [4:0]  writereg;
-  wire [31:0] pcnext, pcnextbr, pcplus4, pcbranch;
+  wire [4:0]  wraddr1_r, wraddr2_r;
+  wire [31:0] pcnext, pcnextbr, pcplus4, pcplus8, pcbranch;
   wire [31:0] signimm, zeroimm, signimmsh;
   wire [31:0] srca, srcb;
-  wire [31:0] result;
+  wire [31:0] result, writedata_r;
 
   // next PC logic
   flopr #(32) pcreg(clk, reset, pcnext, pc);
   adder       pcadd1(pc, 32'b100, pcplus4);
   sl2         immsh(signimm, signimmsh);
+  /*module adder(input   [31:0] a, b,
+               output  [31:0] y);*/
   adder       pcadd2(pcplus4, signimmsh, pcbranch);
+  //pcadd3 to produce pcplus8
+  //pcplus8 used in (Jal)
+  adder       pcadd3(pcplus4, 32'b100, pcplus8);
   mux2 #(32)  pcbrmux(pcplus4, pcbranch, pcsrc,
                       pcnextbr);
   mux2 #(32)  pcmux(pcnextbr, {pcplus4[31:28],
@@ -139,10 +145,14 @@ module datapath(input          clk, reset,
 
   // register file logic
   regfile     rf(clk, regwrite, instr[25:21],
-                 instr[20:16], writereg,
-                 result, srca, writedata);
+                 instr[20:16], wraddr2_r,
+                 writedata_r, srca, writedata);
+  //this mux to chose the Return reg R[31] in case of Jal
+  mux2 #(5)   returnaddr_mux(wraddr1_r, 5'b1111_1, jal, wraddr2_r);
   mux2 #(5)   wrmux(instr[20:16], instr[15:11],
-                    regdst, writereg);
+                    regdst, wraddr1_r);
+  mux2 #(32)  pclinkmux(result, pcplus8,
+                     jal, writedata_r);
   mux2 #(32)  resmux(aluout, readdata,
                      memtoreg, result);
   signext     se(instr[15:0], signimm);
@@ -275,16 +285,15 @@ module dmem(input          clk, we,
       RAM[a[31:2]] <= wd;
 endmodule
 
-module imem(input   [5:0]  a,
-            output  [31:0] rd);
+module imem(input   [5:0]   a,
+            output  [31:0]   rd);
 
   reg [31:0] ROM[63:0];
 
   initial
     begin
-      $readmemh("memfile2.dat",ROM); // initialize memory
+      $readmemh("memfile3.dat",ROM); // initialize memory
     end
 
   assign rd = ROM[a]; // word aligned
 endmodule
-
