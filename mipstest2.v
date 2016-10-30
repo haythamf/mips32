@@ -48,7 +48,7 @@ module testbench();
   //tasks
   task check_c;
     begin
-      $display("branch=%b\nALUControl=%b\nALUSrc=%b\nsrca=%h\nsrcb=%h\naluout=%h\nzero=%h\npcsrc=%h\njump=%b\njal=%b",
+      $display("branch=%b\nALUControl=%b\nALUSrc=%b\nsrca=%h\nsrcb=%h\naluout=%h\nzero=%h\npcsrc=%h\njump=%b\njal=%b\nlui=%b",
       dut.mips.c.branch,
       dut.mips.c.alucontrol,
       dut.mips.c.alusrc,
@@ -58,7 +58,8 @@ module testbench();
       dut.mips.dp.zero,
       dut.mips.c.pcsrc,
       dut.mips.c.jump,
-      dut.mips.c.jal);
+      dut.mips.c.jal,
+      dut.mips.c.lui);
     end
   endtask
 
