@@ -20,14 +20,14 @@ module mips(input          clk, reset,
 
   wire         memtoreg,
                pcsrc, zero,
-               regdst, regwrite, jump, jal;
+               regdst, regwrite, jump, jal, jr;
   wire [1:0] alusrc;
   wire [2:0]  alucontrol;
 
   controller c(instr[31:26], instr[5:0], zero,
                memtoreg, memwrite, pcsrc,
                alusrc, regdst, regwrite, jump,
-               jal, alucontrol);
+               jal, jr, alucontrol);
   datapath dp(clk, reset, memtoreg, pcsrc,
               alusrc, regdst, regwrite, jump, jal,
               alucontrol,
@@ -41,15 +41,15 @@ module controller(input   [5:0] op, funct,
                   output        pcsrc,
                   output  [1:0] alusrc,
                   output        regdst, regwrite,
-                  output        jump, jal,
+                  output        jump, jal, jr,
                   output  [2:0] alucontrol);
 
-  wire [1:0] aluop;
+  wire [2:0] aluop;
   wire       branch;
   wire       bne;
 
   maindec md(op, memtoreg, memwrite, branch, bne,
-             alusrc, regdst, regwrite, jump, jal,
+             alusrc, regdst, regwrite, jump, jal, jr,
              aluop);
   aludec  ad(funct, aluop, alucontrol);
 
@@ -64,10 +64,10 @@ module maindec(input   [5:0] op,
                //alusrc is modified
                output  [1:0] alusrc,
                output        regdst, regwrite,
-               output        jump, jal,
-               output  [1:0] aluop);
+               output        jump, jal, jr,
+               output  [2:0] aluop);
 
-  reg [11:0] controls;
+  reg [12:0] controls;
 
   assign {regwrite, regdst, alusrc,
           branch, memwrite,
@@ -75,28 +75,30 @@ module maindec(input   [5:0] op,
 
   always_comb
     case(op)
-      6'b000000: controls <= 12'b110000001000; //Rtype
-      6'b100011: controls <= 12'b100100100000; //LW
-      6'b101011: controls <= 12'b000101000000; //SW
-      6'b000100: controls <= 12'b000010000100; //BEQ
-      6'b001000: controls <= 12'b100100000000; //ADDI
-      6'b000010: controls <= 12'b000000010000; //J
-      6'b000011: controls <= 12'b100000010001; //jal
-      6'b001101: controls <= 12'b101000001100; // ORI, ALUOp=11 (OR)
-      6'b000101: controls <= 12'b000010000110; // BNE
-      default:   controls <= 12'bxxxxxxxxxxxx; //???
+      6'b000000: controls <= 13'b1100000011100; //Rtype
+      6'b100011: controls <= 13'b1001001000000; //LW
+      6'b101011: controls <= 13'b0001010000000; //SW
+      6'b000100: controls <= 13'b0000100000100; //BEQ
+      6'b001000: controls <= 13'b1001000000000; //ADDI
+      6'b000010: controls <= 13'b0000000100000; //J
+      6'b000011: controls <= 13'b1000000100001; //jal
+      6'b001101: controls <= 13'b1010000001000; // ori, ALUOp=011 (OR)
+      6'b001100: controls <= 13'b1010000001100; // andi, ALUOp=000 (AND)
+      6'b000101: controls <= 13'b0000100000110; // BNE
+      default:   controls <= 13'bxxxxxxxxxxxxx; //???
     endcase
 endmodule
 
 module aludec(input   [5:0] funct,
-              input   [1:0] aluop,
+              input   [2:0] aluop,
               output reg [2:0] alucontrol);
 
   always@(*)
     case(aluop)
-      2'b00: alucontrol <= 3'b010;  // add
-      2'b01: alucontrol <= 3'b110;  // sub
-      2'b11: alucontrol <= 3'b001;  // or
+      3'b000: alucontrol <= 3'b010;  // add
+      3'b001: alucontrol <= 3'b110;  // sub
+      3'b010: alucontrol <= 3'b001;  // or
+      3'b011: alucontrol <= 3'b000;  // and
       default: case(funct)          // RTYPE
           6'b100000: alucontrol <= 3'b010; // ADD
           6'b100010: alucontrol <= 3'b110; // SUB
@@ -125,7 +127,7 @@ module datapath(input          clk, reset,
   wire [31:0] pcnext, pcnextbr, pcplus4, pcplus8, pcbranch;
   wire [31:0] signimm, zeroimm, signimmsh;
   wire [31:0] srca, srcb;
-  wire [31:0] result, writedata_r;
+  wire [31:0] result, wd3;
 
   // next PC logic
   flopr #(32) pcreg(clk, reset, pcnext, pc);
@@ -146,13 +148,13 @@ module datapath(input          clk, reset,
   // register file logic
   regfile     rf(clk, regwrite, instr[25:21],
                  instr[20:16], wraddr2_r,
-                 writedata_r, srca, writedata);
+                 wd3, srca, writedata);
   //this mux to chose the Return reg R[31] in case of Jal
   mux2 #(5)   returnaddr_mux(wraddr1_r, 5'b1111_1, jal, wraddr2_r);
   mux2 #(5)   wrmux(instr[20:16], instr[15:11],
                     regdst, wraddr1_r);
-  mux2 #(32)  pclinkmux(result, pcplus8,
-                     jal, writedata_r);
+  mux2 #(32)  returnmux(result, pcplus8,
+                     jal, wd3);
   mux2 #(32)  resmux(aluout, readdata,
                      memtoreg, result);
   signext     se(instr[15:0], signimm);
