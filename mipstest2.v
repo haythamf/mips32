@@ -14,17 +14,19 @@ module testbench();
   // initialize test
   initial
     begin
-
       integer i;
-      reset <= 1; # 22; reset <= 0;
-      for(i=0;i<5;i=i+1) begin
+      $dumpfile("dump.vcd"); $dumpvars;
+      reset <= 1;
+      #12;
+      reset <= 0;
+      for(i=0;i<1;i=i+1) begin
         @(negedge clk);
-        $display(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\ncycle=%d\ninstr=%h\npc=%h\nPCBranch=%h",
+        $display(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\ncycle=%d\ninstr=%h\npc=%h\nPCBranch=%h\npcnext=%h",
         i,
         dut.instr,
         dut.pc,
         dut.mips.dp.pcbranch,
-        );
+        dut.mips.dp.pcnext);
         $display("===============control signals===================");
       	check_c;
         $display("===============rf values===================");
@@ -46,7 +48,7 @@ module testbench();
   //tasks
   task check_c;
     begin
-      $display("branch=%b\nALUControl=%b\nALUSrc=%b\nsrca=%h\nsrcb=%h\naluout=%h\nzero=%h\npcsrc=%h",
+      $display("branch=%b\nALUControl=%b\nALUSrc=%b\nsrca=%h\nsrcb=%h\naluout=%h\nzero=%h\npcsrc=%h\njump=%b\njal=%b",
       dut.mips.c.branch,
       dut.mips.c.alucontrol,
       dut.mips.c.alusrc,
@@ -54,15 +56,18 @@ module testbench();
       dut.mips.dp.srcb,
       dut.mips.dp.aluout,
       dut.mips.dp.zero,
-      dut.mips.c.pcsrc);
+      dut.mips.c.pcsrc,
+      dut.mips.c.jump,
+      dut.mips.c.jal);
     end
   endtask
 
   task check_rf;
     begin
-      $display("wa3=%d(d) contains wd3=%h",
+      $display("wa3=%d(d) contains wd3=%h\nregwrite=%b",
       dut.mips.dp.rf.wa3,
-      dut.mips.dp.rf.wd3);
+      dut.mips.dp.rf.wd3,
+      dut.mips.dp.rf.we3);
 
     end
   endtask
