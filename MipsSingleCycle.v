@@ -20,18 +20,18 @@ module mips(input          clk, reset,
 
   wire         memtoreg,
                pcsrc, zero,
-               regdst, regwrite, jump, jal, jr;
+               regdst, regwrite, jump, jal, jr,
+               lui;
   wire [1:0] alusrc;
   wire [2:0]  alucontrol;
 
   controller c(instr[31:26], instr[5:0], zero,
                memtoreg, memwrite, pcsrc,
                alusrc, regdst, regwrite, jump,
-               jal, jr, alucontrol);
+               jal, lui, alucontrol);
   datapath dp(clk, reset, memtoreg, pcsrc,
               alusrc, regdst, regwrite, jump, jal,
-              alucontrol,
-              zero, pc, instr,
+              lui, alucontrol, zero, pc, instr,
               aluout, writedata, readdata);
 endmodule
 
@@ -41,7 +41,7 @@ module controller(input   [5:0] op, funct,
                   output        pcsrc,
                   output  [1:0] alusrc,
                   output        regdst, regwrite,
-                  output        jump, jal, jr,
+                  output        jump, jal, lui,
                   output  [2:0] alucontrol);
 
   wire [2:0] aluop;
@@ -49,7 +49,7 @@ module controller(input   [5:0] op, funct,
   wire       bne;
 
   maindec md(op, memtoreg, memwrite, branch, bne,
-             alusrc, regdst, regwrite, jump, jal, jr,
+             alusrc, regdst, regwrite, jump, jal, lui,
              aluop);
   aludec  ad(funct, aluop, alucontrol);
 
@@ -64,28 +64,29 @@ module maindec(input   [5:0] op,
                //alusrc is modified
                output  [1:0] alusrc,
                output        regdst, regwrite,
-               output        jump, jal, jr,
+               output        jump, jal, lui,
                output  [2:0] aluop);
 
-  reg [12:0] controls;
+  reg [13:0] controls;
 
   assign {regwrite, regdst, alusrc,
           branch, memwrite,
-          memtoreg, jump, aluop, bne, jal} = controls; // expanded
+          memtoreg, jump, aluop, bne, jal, lui} = controls; // expanded
 
   always_comb
     case(op)
-      6'b000000: controls <= 13'b1100000011100; //Rtype
-      6'b100011: controls <= 13'b1001001000000; //LW
-      6'b101011: controls <= 13'b0001010000000; //SW
-      6'b000100: controls <= 13'b0000100000100; //BEQ
-      6'b001000: controls <= 13'b1001000000000; //ADDI
-      6'b000010: controls <= 13'b0000000100000; //J
-      6'b000011: controls <= 13'b1000000100001; //jal
-      6'b001101: controls <= 13'b1010000001000; // ori, ALUOp=011 (OR)
-      6'b001100: controls <= 13'b1010000001100; // andi, ALUOp=000 (AND)
-      6'b000101: controls <= 13'b0000100000110; // BNE
-      default:   controls <= 13'bxxxxxxxxxxxxx; //???
+      6'b000000: controls <= 14'b11000000111000; //Rtype
+      6'b100011: controls <= 14'b10010010000000; //LW
+      6'b101011: controls <= 14'b00010100000000; //SW
+      6'b000100: controls <= 14'b00001000001000; //BEQ
+      6'b001000: controls <= 14'b10010000000000; //ADDI
+      6'b000010: controls <= 14'b00000001000000; //J
+      6'b000011: controls <= 14'b10000001000010; //jal
+      6'b001101: controls <= 14'b10100000010000; // ori, ALUOp=011 (OR)
+      6'b001100: controls <= 14'b10100000011000; // andi, ALUOp=000 (AND)
+      6'b000101: controls <= 14'b00001000001100; // BNE
+      6'b001111: controls <= 14'b10000000000001; //lui
+      default:   controls <= 14'bxxxxxxxxxxxxxx; //???
     endcase
 endmodule
 
@@ -115,7 +116,7 @@ module datapath(input          clk, reset,
                 // expanded for ori
                 input   [1:0]  alusrc,
                 input          regdst,
-                input          regwrite, jump, jal,
+                input          regwrite, jump, jal, lui,
                 input   [2:0]  alucontrol,
                 output         zero,
                 output  [31:0] pc,
@@ -153,8 +154,8 @@ module datapath(input          clk, reset,
   mux2 #(5)   returnaddr_mux(wraddr1_r, 5'b1111_1, jal, wraddr2_r);
   mux2 #(5)   wrmux(instr[20:16], instr[15:11],
                     regdst, wraddr1_r);
-  mux2 #(32)  returnmux(result, pcplus8,
-                     jal, wd3);
+  mux4 #(32)  wd3mux(result, pcplus8, {instr[15:0],16'b0}, 32'bz,
+                     {lui,jal}, wd3);
   mux2 #(32)  resmux(aluout, readdata,
                      memtoreg, result);
   signext     se(instr[15:0], signimm);
