@@ -23,7 +23,7 @@ module mips(input          clk, reset,
                regdst, regwrite, jump, jal, jr,
                lui;
   wire [1:0] alusrc;
-  wire [2:0]  alucontrol;
+  wire [3:0]  alucontrol;
 
   controller c(instr[31:26], instr[5:0], zero,
                memtoreg, memwrite, pcsrc,
@@ -42,7 +42,7 @@ module controller(input   [5:0] op, funct,
                   output  [1:0] alusrc,
                   output        regdst, regwrite,
                   output        jump, jal, lui,
-                  output  [2:0] alucontrol);
+                  output  [3:0] alucontrol);
 
   wire [2:0] aluop;
   wire       branch;
@@ -84,6 +84,7 @@ module maindec(input   [5:0] op,
       6'b000011: controls <= 14'b10000001000010; //jal
       6'b001101: controls <= 14'b10100000010000; // ori, ALUOp=011 (OR)
       6'b001100: controls <= 14'b10100000011000; // andi, ALUOp=000 (AND)
+      6'b001110: controls <= 14'b10100000100000; // xori, ALUOp=000 (AND)
       6'b000101: controls <= 14'b00001000001100; // BNE
       6'b001111: controls <= 14'b10000000000001; //lui
       default:   controls <= 14'bxxxxxxxxxxxxxx; //???
@@ -92,21 +93,25 @@ endmodule
 
 module aludec(input   [5:0] funct,
               input   [2:0] aluop,
-              output reg [2:0] alucontrol);
+              output reg [3:0] alucontrol);
 
   always@(*)
     case(aluop)
-      3'b000: alucontrol <= 3'b010;  // add
-      3'b001: alucontrol <= 3'b110;  // sub
-      3'b010: alucontrol <= 3'b001;  // or
-      3'b011: alucontrol <= 3'b000;  // and
+      3'b000: alucontrol <= 4'b0010;  // add
+      3'b001: alucontrol <= 4'b1010;  // sub
+      3'b010: alucontrol <= 4'b0001;  // or
+      3'b011: alucontrol <= 4'b0000;  // and
+      3'b100: alucontrol <= 4'b0111;  // xor
       default: case(funct)          // RTYPE
-          6'b100000: alucontrol <= 3'b010; // ADD
-          6'b100010: alucontrol <= 3'b110; // SUB
-          6'b100100: alucontrol <= 3'b000; // AND
-          6'b100101: alucontrol <= 3'b001; // OR
-          6'b101010: alucontrol <= 3'b111; // SLT
-          default:   alucontrol <= 3'bxxx; // ???
+          6'b100000: alucontrol <= 4'b0010; // ADD
+          6'b100010: alucontrol <= 4'b1010; // SUB
+          6'b100100: alucontrol <= 4'b0000; // AND
+          6'b100101: alucontrol <= 4'b0001; // OR
+          6'b101010: alucontrol <= 4'b1011; // SLT
+          6'b000000: alucontrol <= 4'b0100; // sll
+          6'b000010: alucontrol <= 4'b0101; // srl
+          6'b000011: alucontrol <= 4'b0110; // sra
+          default:   alucontrol <= 4'bxxx; // ???
         endcase
     endcase
 endmodule
@@ -117,7 +122,7 @@ module datapath(input          clk, reset,
                 input   [1:0]  alusrc,
                 input          regdst,
                 input          regwrite, jump, jal, lui,
-                input   [2:0]  alucontrol,
+                input   [3:0]  alucontrol,
                 output         zero,
                 output  [31:0] pc,
                 input   [31:0] instr,
@@ -167,8 +172,8 @@ module datapath(input          clk, reset,
   mux4 #(32)  srcbmux(writedata, signimm, zeroimm, ,alusrc,
                       srcb);
 
-  alu32         alu(.A(srca), .B(srcb), .F(alucontrol),
-                  .Y(aluout), .Zero(zero));
+  alu32         alu(srca, srcb, alucontrol, instr[10:6],
+                  aluout, zero);
 
   //
 endmodule
@@ -255,23 +260,53 @@ module mux4 #(parameter WIDTH = 32)
   assign y = s[1] ? (s[0] ? d3: d2) : (s[0] ? d1: d0);
 endmodule
 
-module alu32( input [31:0] A, B, input [2:0] F,
+module alu32( input [31:0] A, B, input [3:0] F,
+              input [4:0] shamt,
               output reg [31:0] Y,
               output Zero);
+
     wire [31:0] S, Bout;
 
-    assign Bout = F[2] ? ~B : B;
-    assign S = A + Bout + F[2];
+    assign Bout = F[3] ? ~B : B;
+    assign S = A + Bout + F[3];
 
     always @ (*)
-      case (F[1:0])
-        2'b00: Y <= A & Bout;
-        2'b01: Y <= A | Bout;
-        2'b10: Y <= S;
-        2'b11: Y <= S[31];
+      case (F[2:0])
+        3'b000: Y <= A & Bout;
+        3'b001: Y <= A | Bout;
+        3'b010: Y <= S;
+        3'b011: Y <= S[31];
+        3'b100: Y <= Bout << shamt;
+        3'b101: Y <= Bout >> shamt;
+        3'b110: Y <= Bout >>> shamt;
+        default: Y <= A ^ Bout;
       endcase
 
       assign Zero = (Y == 32'b0);
+
+endmodule
+
+module sll (input [31:0]  a,
+            input [4:0]   shamt,
+            output [31:0] y);
+
+  assign y=a << shamt;
+
+endmodule
+
+module srl (input [31:0]  a,
+            input [4:0]   shamt,
+            output [31:0] y);
+
+  assign y=a >> shamt;
+
+endmodule
+
+module sra (input [31:0]  a,
+            input [4:0]   shamt,
+            output [31:0] y);
+
+  assign y=a >>> shamt;
 
 endmodule
 
