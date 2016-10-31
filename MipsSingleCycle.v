@@ -87,6 +87,7 @@ module maindec(input   [5:0] op,
       6'b001110: controls <= 14'b10100000100000; // xori, ALUOp=000 (AND)
       6'b000101: controls <= 14'b00001000001100; // BNE
       6'b001111: controls <= 14'b10000000000001; //lui
+      6'b001010: controls <= 14'b10010000101000; //slti
       default:   controls <= 14'bxxxxxxxxxxxxxx; //???
     endcase
 endmodule
@@ -102,6 +103,7 @@ module aludec(input   [5:0] funct,
       3'b010: alucontrol <= 4'b0001;  // or
       3'b011: alucontrol <= 4'b0000;  // and
       3'b100: alucontrol <= 4'b0111;  // xor
+      3'b101: alucontrol <= 4'b1011;  // slt
       default: case(funct)          // RTYPE
           6'b100000: alucontrol <= 4'b0010; // ADD
           6'b100010: alucontrol <= 4'b1010; // SUB
