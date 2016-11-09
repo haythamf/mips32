@@ -36,7 +36,7 @@ module mips(input          clk, reset,
 endmodule
 
 module controller(input   [5:0] op, funct,
-                  input         zero,
+                  input         zero, ltez,
                   output        memtoreg, memwrite,
                   output        pcsrc,
                   output  [1:0] alusrc,
@@ -47,13 +47,15 @@ module controller(input   [5:0] op, funct,
   wire [2:0] aluop;
   wire       branch;
   wire       bne;
+  wire       blez;
+
 
   maindec md(op, memtoreg, memwrite, branch, bne,
              alusrc, regdst, regwrite, jump, jal, lui,
              aluop);
   aludec  ad(funct, aluop, alucontrol);
 
-  assign pcsrc = branch & (bne ^ zero);
+  assign pcsrc = (branch & (bne ^ zero)) | (ltez & blez);
 endmodule
 
 module maindec(input   [5:0] op,
@@ -265,7 +267,8 @@ endmodule
 module alu32( input [31:0] A, B, input [3:0] F,
               input [4:0] shamt,
               output reg [31:0] Y,
-              output Zero);
+              output Zero,
+              output ltez//less than or equal to zero);
 
     wire [31:0] S, Bout;
 
@@ -285,6 +288,7 @@ module alu32( input [31:0] A, B, input [3:0] F,
       endcase
 
       assign Zero = (Y == 32'b0);
+      assign ltez = (Y == 32'b0) | S[31];
 
 endmodule
 
